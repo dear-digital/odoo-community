@@ -55,23 +55,34 @@ jobs:
             exit 0
           fi
 
-          # Refuse anything that is not a clean fast-forward. "behind" means our
-          # tip is an ancestor of theirs, which is the only case we accept.
-          STATUS="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/compare/${BRANCH}...${UPSTREAM_OWNER}:${BRANCH}" \
-            --jq .status)"
-          echo "compare  : ${STATUS}"
+          # Refuse anything that is not a clean fast-forward.
+          #
+          # Compare the two commits INSIDE the upstream repository - our tip came
+          # from there, so it exists there - and require behind_by == 0: nothing
+          # in our branch that upstream does not already have. That is exactly
+          # "fast-forwardable", and unlike the `status` string it cannot be read
+          # the wrong way round.
+          CMP="$(GH_TOKEN="${UPSTREAM_READ_TOKEN}" \
+            gh api "repos/${UPSTREAM_REPO}/compare/${OURS}...${THEIRS}" \
+            --jq '"'"'{status: .status, ahead: .ahead_by, behind: .behind_by}'"'"')"
+          echo "compare  : ${CMP}"
 
-          case "${STATUS}" in
-            behind)    ;;
-            identical) echo "Already up to date."; exit 0 ;;
-            *)
-              echo "::error::Mirror is '${STATUS}' relative to upstream, not 'behind'."
-              echo "::error::Either someone committed to ${BRANCH}, or upstream rewrote"
-              echo "::error::history. Refusing to sync - investigate before acting."
-              exit 1
-              ;;
-          esac
+          AHEAD="$(printf '%s' "${CMP}" | jq -r .ahead)"
+          BEHIND="$(printf '%s' "${CMP}" | jq -r .behind)"
+
+          if [ "${BEHIND}" != "0" ]; then
+            echo "::error::Our ${BRANCH} holds ${BEHIND} commit(s) upstream does not have."
+            echo "::error::Either someone committed to ${BRANCH}, or upstream rewrote"
+            echo "::error::history. Refusing to sync - investigate before acting."
+            exit 1
+          fi
+
+          if [ "${AHEAD}" = "0" ]; then
+            echo "Already up to date."
+            exit 0
+          fi
+
+          echo "Fast-forwarding ${AHEAD} commit(s)."
 
           MERGE_TYPE="$(gh api -X POST "repos/${GITHUB_REPOSITORY}/merge-upstream" \
             -f branch="${BRANCH}" --jq .merge_type)"
