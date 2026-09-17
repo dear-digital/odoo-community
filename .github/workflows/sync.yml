@@ -1,0 +1,61 @@
+name: Sync 19.0 from upstream
+
+on:
+  schedule:
+    # Daily. Deliberately not on the hour: GitHub's scheduler is congested at :00
+    # and jobs can be delayed or dropped.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mirror-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Fast-forward 19.0 from upstream
+        env:
+          UPSTREAM_URL: https://github.com/odoo/odoo.git
+          BRANCH: '19.0'
+        run: |
+          set -euo pipefail
+
+          # Bare clone of our own mirror: no working tree, only the delta transfers.
+          git clone --bare --single-branch --branch "$BRANCH" \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            mirror
+          cd mirror
+
+          git remote add upstream "$UPSTREAM_URL"
+
+          # --no-tags: never let a tag fetch prune or move our deployed/* tags.
+          git fetch --no-tags upstream "$BRANCH"
+
+          BEFORE="$(git rev-parse "refs/heads/$BRANCH")"
+          AFTER="$(git rev-parse FETCH_HEAD)"
+
+          echo "mirror   : $BEFORE"
+          echo "upstream : $AFTER"
+
+          if [ "$BEFORE" = "$AFTER" ]; then
+            echo "Already up to date."
+            exit 0
+          fi
+
+          # Refuse anything that is not a fast-forward. If upstream rewrote
+          # history, fail loudly - do not destroy commits we have pinned.
+          if ! git merge-base --is-ancestor "$BEFORE" "$AFTER"; then
+            echo "::error::Upstream $BRANCH is not a descendant of the mirror's $BRANCH."
+            echo "::error::Refusing to push. Investigate before doing anything by hand."
+            exit 1
+          fi
+
+          echo "Fast-forwarding $BRANCH: $(git rev-list --count "$BEFORE..$AFTER") new commits"
+          git push origin "FETCH_HEAD:refs/heads/$BRANCH"
+          echo "Done."
