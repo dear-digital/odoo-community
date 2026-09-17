@@ -36,12 +36,31 @@ Actions tab (**Run workflow**).
 Syncing **never changes what any environment runs.** It is safe at any time.
 Only moving a submodule pin in `dear-digital/comoo` changes a deployment.
 
-Deliberate choices in the workflow, do not "simplify" them away:
+### How it works
 
-- **no `--mirror`, no `--prune`, `--no-tags`** — each of those would delete the
+The default path is **server-side**. A fork and its parent share an object store
+on GitHub, so the upstream commits already exist on GitHub's side; the job simply
+asks GitHub to move our `19.0` ref (`POST /repos/.../merge-upstream` - the API
+behind the "Sync fork" button). It takes seconds and transfers nothing.
+
+Before doing that it compares the two branches and **only proceeds when the
+status is `behind`**, meaning our tip is an ancestor of upstream's. Anything else
+(`ahead`, `diverged`) fails the job rather than creating a merge commit on
+`19.0`, which would break the mirror.
+
+### The git fallback
+
+Dispatch the workflow with **method = `git`** to use the original route: clone
+the branch, fetch upstream, push a fast-forward. That downloads the full branch
+history - about 1.3 GB and a few minutes - so it is not the daily path, but it is
+the known-good one if the API route ever fails.
+
+Deliberate choices in that path, do not "simplify" them away:
+
+- **no `--mirror`, no `--prune`, `--no-tags`** - each would delete the
   `deployed/*` tags that keep pinned commits alive.
-- **no `--force`** — the push is fast-forward only. If upstream ever rewrites
-  history the job fails loudly instead of destroying pinned commits.
+- **no `--force`** - the push is fast-forward only, so a rewritten upstream fails
+  loudly instead of destroying pinned commits.
 - the job **verifies** the new tip is a descendant of the old one before pushing.
 
 ## Related
