@@ -64,11 +64,10 @@ jobs:
           # the wrong way round.
           CMP="$(GH_TOKEN="${UPSTREAM_READ_TOKEN}" \
             gh api "repos/${UPSTREAM_REPO}/compare/${OURS}...${THEIRS}" \
-            --jq '"'"'{status: .status, ahead: .ahead_by, behind: .behind_by}'"'"')"
-          echo "compare  : ${CMP}"
+            --jq "[.status, .ahead_by, .behind_by] | @tsv")"
 
-          AHEAD="$(printf '%s' "${CMP}" | jq -r .ahead)"
-          BEHIND="$(printf '%s' "${CMP}" | jq -r .behind)"
+          IFS=$'	' read -r STATUS AHEAD BEHIND <<< "${CMP}"
+          echo "compare  : status=${STATUS} ahead=${AHEAD} behind=${BEHIND}"
 
           if [ "${BEHIND}" != "0" ]; then
             echo "::error::Our ${BRANCH} holds ${BEHIND} commit(s) upstream does not have."
