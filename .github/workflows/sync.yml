@@ -83,8 +83,18 @@ jobs:
 
           echo "Fast-forwarding ${AHEAD} commit(s)."
 
-          MERGE_TYPE="$(gh api -X POST "repos/${GITHUB_REPOSITORY}/merge-upstream" \
-            -f branch="${BRANCH}" --jq .merge_type)"
+          # Run this with the SAME token that could read upstream. merge-upstream
+          # reads from the parent, so the built-in GITHUB_TOKEN - an installation
+          # token scoped to this repository - gets HTTP 403 "Resource not
+          # accessible by integration" whenever the parent is private.
+          if ! MERGE_TYPE="$(GH_TOKEN="${UPSTREAM_READ_TOKEN}" \
+                gh api -X POST "repos/${GITHUB_REPOSITORY}/merge-upstream" \
+                -f branch="${BRANCH}" --jq .merge_type)"; then
+            echo "::error::merge-upstream failed. The token needs to read ${UPSTREAM_REPO}"
+            echo "::error::AND write to this repository. HTTP 403 here usually means it"
+            echo "::error::can do one but not the other."
+            exit 1
+          fi
           echo "merge    : ${MERGE_TYPE}"
 
           if [ "${MERGE_TYPE}" != "fast-forward" ]; then
